@@ -45,7 +45,8 @@ class AnthropicClient(BaseLLMClient):
                 {"role": "user", "content": prompt}
             ],
         )
-        return response.content[0].text
+        # La respuesta puede incluir bloques de "thinking"; tomamos el primer bloque de texto
+        return next((b.text for b in response.content if b.type == "text"), "")
 
 # 3. Consumo del cliente sin acoplarse a la implementación específica
 async def main():
