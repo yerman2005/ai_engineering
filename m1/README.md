@@ -1,5 +1,7 @@
 # Unified Async LLM Client
 
+[![m1-tests](https://github.com/yerman2005/ai_engineering/actions/workflows/m1-tests.yml/badge.svg)](https://github.com/yerman2005/ai_engineering/actions/workflows/m1-tests.yml)
+
 Pre-entrega del **Módulo 1 · La interfaz base: conexión y abstracción de LLMs** (AI Engineering, Coderhouse).
 
 Capa de abstracción asíncrona para trabajar con **OpenAI** y **Anthropic** a través de una interfaz común:
@@ -17,18 +19,51 @@ Capa de abstracción asíncrona para trabajar con **OpenAI** y **Anthropic** a t
 
 ## Instalación
 
+Todos los comandos se ejecutan desde la carpeta `m1/`.
+
+**0. Verificar que haya Python 3.12 o superior.** Python 3.11 no sirve: `pyproject.toml` declara `requires-python = ">=3.12"` y pip rechaza la instalación.
+
 ```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# Linux / macOS
-source .venv/bin/activate
-
-pip install -e ".[dev]"     # dependencias + herramientas de desarrollo (pytest, ruff)
+python3.12 --version        # Linux / macOS
+py -3.12 --version          # Windows
 ```
 
-`pip install -e .` instala solo las dependencias de ejecución: `openai`, `anthropic`, `pydantic` y `python-dotenv`.
+**1. Crear el entorno virtual con Python 3.12.**
+
+```bash
+python3.12 -m venv .venv    # Linux / macOS
+py -3.12 -m venv .venv      # Windows
+```
+
+> El entorno virtual es obligatorio. En sistemas con PEP 668 (`error: externally-managed-environment`), pip no permite instalar paquetes en el Python del sistema. Dentro del venv sí.
+
+**2. Activar el entorno virtual** y confirmar la versión:
+
+```bash
+source .venv/bin/activate   # Linux / macOS
+.venv\Scripts\activate      # Windows
+
+python --version            # tiene que mostrar 3.12 o superior
+```
+
+**3. Instalar las dependencias.**
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
+- Dependencias de ejecución: `openai`, `anthropic`, `pydantic`, `python-dotenv`.
+- Extra `[dev]`: `pytest`, `pytest-asyncio`, `ruff`.
+- Para instalar solo las de ejecución: `python -m pip install -e .`
+
+**4. Correr los tests.**
+
+```bash
+python -m pytest            # resultado esperado: 73 passed
+```
+
+Los tests no hacen llamadas de red ni necesitan API keys.
 
 ## Configuración
 
@@ -134,6 +169,8 @@ tests/                   # tests con pytest; los SDKs se reemplazan por dobles (
 También se puede pasar cualquier `BaseLLMClient` directamente a `AsyncLLMManager(client)`.
 
 ## Calidad de código
+
+En cada push a `main`, GitHub Actions corre lint, formato y tests con Python 3.12, 3.13 y 3.14 (ver el badge de arriba).
 
 ```bash
 pytest                    # suite completa (no hace llamadas reales ni gasta créditos)

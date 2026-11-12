@@ -10,8 +10,10 @@ from llm_client import (
     AnthropicClient,
     ChatMessage,
     GenerationConfig,
+    LLMAuthenticationError,
     LLMConfigurationError,
     LLMConnectionError,
+    LLMProviderError,
     LLMRateLimitError,
     LLMTimeoutError,
     Role,
@@ -113,6 +115,8 @@ async def test_stream_produce_fragmentos_y_cierra_el_stream() -> None:
     ("sdk_error", "expected"),
     [
         (sdk_status_error(anthropic.RateLimitError, 429), LLMRateLimitError),
+        (sdk_status_error(anthropic.AuthenticationError, 401), LLMAuthenticationError),
+        (sdk_status_error(anthropic.InternalServerError, 529), LLMProviderError),
         (sdk_request_error(anthropic.APIConnectionError), LLMConnectionError),
         (sdk_request_error(anthropic.APITimeoutError), LLMTimeoutError),
     ],
@@ -126,10 +130,37 @@ async def test_generate_traduce_errores_del_sdk(sdk_error: Exception, expected: 
     assert exc_info.value.provider == "anthropic"
 
 
+async def test_generate_sin_sistema_no_envia_el_parametro_system() -> None:
+    create = AsyncMock(return_value=make_message())
+
+    await make_client(make_sdk(create=create)).generate(
+        [ChatMessage(role=Role.USER, content="Hola")]
+    )
+
+    assert "system" not in create.await_args.kwargs
+
+
 async def test_stream_traduce_errores_del_sdk() -> None:
     error = sdk_status_error(anthropic.RateLimitError, 429)
     stream = MagicMock(return_value=FakeAnthropicStream(["parcial"], error=error))
+    received: list[str] = []
 
-    with pytest.raises(LLMRateLimitError):
-        async for _ in make_client(make_sdk(stream=stream)).stream(MESSAGES):
+    with pytest.raises(LLMRateLimitError) as exc_info:
+        async for chunk in make_client(make_sdk(stream=stream)).stream(MESSAGES):
+            received.append(chunk)
+
+    assert received == ["parcial"]
+    assert exc_info.value.__cause__ is error
+
+
+async def test_stream_respeta_el_timeout_entre_fragmentos() -> None:
+    sdk_stream = FakeAnthropicStream(["a"], delay=1)
+    stream = MagicMock(return_value=sdk_stream)
+
+    with pytest.raises(LLMTimeoutError):
+        async for _ in make_client(make_sdk(stream=stream)).stream(
+            MESSAGES, GenerationConfig(timeout_s=0.01)
+        ):
             pass
+
+    assert sdk_stream.closed

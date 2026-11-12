@@ -1,3 +1,4 @@
+from contextlib import aclosing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -159,6 +160,56 @@ async def test_stream_traduce_errores_a_mitad_de_camino() -> None:
             received.append(chunk)
 
     assert received == ["parcial"]
+
+
+async def test_error_generico_del_sdk_sin_status_es_error_de_proveedor() -> None:
+    error = openai.APIError("respuesta inválida", request=None, body=None)
+    client = make_client(AsyncMock(side_effect=error))
+
+    with pytest.raises(LLMProviderError) as exc_info:
+        await client.generate(MESSAGES)
+
+    assert exc_info.value.status_code is None
+    assert not exc_info.value.retryable
+    assert exc_info.value.__cause__ is error
+
+
+async def test_generate_no_disfraza_errores_que_no_son_del_sdk() -> None:
+    client = make_client(AsyncMock(side_effect=ValueError("bug")))
+
+    with pytest.raises(ValueError, match="bug"):
+        await client.generate(MESSAGES)
+
+
+async def test_stream_no_disfraza_errores_que_no_son_del_sdk() -> None:
+    create = AsyncMock(return_value=FakeOpenAIStream([openai_chunk("a")], error=KeyError("bug")))
+
+    with pytest.raises(KeyError):
+        async for _ in make_client(create).stream(MESSAGES):
+            pass
+
+
+async def test_stream_traduce_el_error_al_abrir_el_stream() -> None:
+    create = AsyncMock(side_effect=sdk_status_error(openai.RateLimitError, 429))
+    received: list[str] = []
+
+    with pytest.raises(LLMRateLimitError):
+        async for chunk in make_client(create).stream(MESSAGES):
+            received.append(chunk)
+
+    assert received == []
+
+
+async def test_stream_cierra_el_stream_del_sdk_si_el_consumidor_corta() -> None:
+    sdk_stream = FakeOpenAIStream([openai_chunk("uno"), openai_chunk("dos"), openai_chunk("tres")])
+    create = AsyncMock(return_value=sdk_stream)
+
+    async with aclosing(make_client(create).stream(MESSAGES)) as chunks:
+        async for chunk in chunks:
+            assert chunk == "uno"
+            break
+
+    assert sdk_stream.closed
 
 
 async def test_context_manager_cierra_el_cliente() -> None:

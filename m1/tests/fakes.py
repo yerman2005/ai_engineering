@@ -62,8 +62,9 @@ def openai_chunk(text: str | None) -> SimpleNamespace:
 class FakeAnthropicStream:
     """Imita el context manager que devuelve `AsyncAnthropic.messages.stream()`."""
 
-    def __init__(self, texts: Iterable[str], *, error: Exception | None = None):
+    def __init__(self, texts: Iterable[str], *, delay: float = 0.0, error: Exception | None = None):
         self._texts = list(texts)
+        self._delay = delay
         self._error = error
         self.closed = False
 
@@ -76,6 +77,7 @@ class FakeAnthropicStream:
     @property
     async def text_stream(self) -> AsyncIterator[str]:
         for text in self._texts:
+            await asyncio.sleep(self._delay)
             yield text
         if self._error is not None:
             raise self._error
