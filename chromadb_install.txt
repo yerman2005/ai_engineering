@@ -1,0 +1,24 @@
+1. Instalar ChromaDB en Windows 11
+Primero, verificá que tengas Python instalado:
+python --version
+
+
+Creá un directorio para tu proyecto:
+mkdir chromadb-local
+cd chromadb-local
+
+
+Creá un entorno virtual:
+python -m venv .venv
+
+
+Activá el entorno virtual:
+.venv\Scripts\activate
+
+
+Instalá ChromaDB:
+pip install chromadb
+
+
+Verificá la instalación:
+pip show chromadb
