@@ -13,9 +13,11 @@ import argparse
 import asyncio
 import logging
 import sys
+from collections.abc import Callable
 
 from ingest import ingestar
 from rag import get_rag_response
+from schemas import RespuestaRAG
 
 PREGUNTA = "¿Para qué sirve un asyncio.Semaphore cuando se llama a un LLM?"
 
@@ -40,7 +42,37 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def ejecutar(titulo: str, pregunta: str) -> bool:
+RESPUESTA_DESCONOCIDA = "no lo sé"
+
+
+def es_no_lo_se(resultado: RespuestaRAG) -> bool:
+    """True si el modelo declaró no saber (ignora mayúsculas y puntuación final)."""
+    return resultado.respuesta.strip().rstrip(".!").lower() == RESPUESTA_DESCONOCIDA
+
+
+def verificar_respondible(resultado: RespuestaRAG) -> str | None:
+    """La respuesta debe salir de los documentos: no 'No lo sé' y con al menos una referencia."""
+    if es_no_lo_se(resultado):
+        return "el modelo respondió 'No lo sé' aunque la respuesta está en los documentos"
+    if not resultado.referencias:
+        return "la respuesta no cita ninguna referencia"
+    return None
+
+
+def verificar_trampa(resultado: RespuestaRAG) -> str | None:
+    """Sin alucinación: debe responder exactamente 'No lo sé' y sin referencias."""
+    if not es_no_lo_se(resultado):
+        return f"posible alucinación: se esperaba 'No lo sé' y respondió {resultado.respuesta!r}"
+    if resultado.referencias:
+        return f"se esperaban referencias vacías y devolvió {resultado.referencias}"
+    return None
+
+
+async def ejecutar(
+    titulo: str,
+    pregunta: str,
+    verificar: Callable[[RespuestaRAG], str | None],
+) -> bool:
     print(f"\n{'=' * 60}\n{titulo}\n{'=' * 60}\nPregunta: {pregunta}\n")
     try:
         resultado = await get_rag_response(pregunta)
@@ -48,7 +80,10 @@ async def ejecutar(titulo: str, pregunta: str) -> bool:
         print(f"[error] {type(exc).__name__}: {exc}")
         return False
     print(resultado.model_dump_json(indent=2))
-    return True
+
+    error = verificar(resultado)
+    print(f"\n[FALLO] {error}" if error else "\n[OK] verificación superada")
+    return error is None
 
 
 async def main(pregunta: str = PREGUNTA, pregunta_trampa: str = PREGUNTA_TRAMPA) -> int:
@@ -57,8 +92,16 @@ async def main(pregunta: str = PREGUNTA, pregunta_trampa: str = PREGUNTA_TRAMPA)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     await asyncio.to_thread(ingestar)
-    ok = await ejecutar("Prueba 1: pregunta respondible con los documentos", pregunta)
-    ok_trampa = await ejecutar("Prueba 2: pregunta trampa (fuera de contexto)", pregunta_trampa)
+    ok = await ejecutar(
+        "Prueba 1: pregunta respondible con los documentos", pregunta, verificar_respondible
+    )
+    ok_trampa = await ejecutar(
+        "Prueba 2: pregunta trampa (fuera de contexto)", pregunta_trampa, verificar_trampa
+    )
+
+    print(f"\n{'=' * 60}")
+    print(f"Prueba 1 (respondible): {'OK' if ok else 'FALLO'}")
+    print(f"Prueba 2 (trampa, sin alucinar): {'OK' if ok_trampa else 'FALLO'}")
     return 0 if ok and ok_trampa else 1
 
 

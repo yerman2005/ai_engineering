@@ -23,7 +23,7 @@ m3/
 └── README.md
 ```
 
-La base vectorial es la instalación local de ChromaDB en `../chromadb-local`. La colección `m3_rag` se guarda en `../chromadb-local/vectorstore`.
+La base vectorial es la instalación local de ChromaDB en `../chromadb-local`. La colección `m3_rag` se guarda en `../chromadb-local/vectorstore`. Esa carpeta no se versiona y ChromaDB la crea automáticamente en la primera ingesta.
 
 ## Componentes
 
@@ -31,6 +31,8 @@ La base vectorial es la instalación local de ChromaDB en `../chromadb-local`. L
   - Si la colección ya tiene datos, no reindexa. Así no se repite el costo de los embeddings.
   - Lee los archivos `.txt` y `.md` de `data/`.
   - Los fragmenta con `RecursiveCharacterTextSplitter.from_tiktoken_encoder` en chunks de **500 tokens con 50 de overlap**, medidos con `tiktoken`.
+    - `chunk_size=500` es el tamaño objetivo de cada chunk. El splitter corta en límites naturales (párrafos, líneas, oraciones), así que un chunk nunca supera 500 tokens y el último de cada archivo es el resto del documento.
+    - Con el dataset de ejemplo (archivos de 667 a 811 tokens) se generan 8 chunks: uno de ~480 tokens y uno de cierre por archivo, con 50 tokens compartidos entre ambos.
   - Les agrega el metadato `source` (nombre del archivo) y un ID determinista (`<archivo>-<n>`).
   - Los persiste con `langchain_chroma.Chroma` (`persist_directory`).
 - **Embeddings**: OpenAI `text-embedding-3-small`. Se usa **el mismo modelo** para indexar y para consultar.
@@ -56,13 +58,16 @@ La base vectorial es la instalación local de ChromaDB en `../chromadb-local`. L
 
 ## Instalación
 
-m3 se ejecuta con el entorno virtual de `chromadb-local`, que ya tiene ChromaDB instalado:
+Creá un entorno virtual dentro de `m3` e instalá las dependencias (`langchain`, `chromadb`, `openai`, `pydantic`, etc.):
 
 ```bash
 cd m3
-..\chromadb-local\.venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+El entorno virtual (`.venv/`) y el archivo `.env` están en `.gitignore` y no se versionan.
 
 ## Configuración
 
@@ -93,6 +98,13 @@ python main.py        # ingesta si hace falta + las dos pruebas
 
 1. **Pregunta respondible**: "¿Para qué sirve un asyncio.Semaphore cuando se llama a un LLM?". La respuesta está en `data/01_asyncio.md`.
 2. **Pregunta trampa**: "¿Cuál es la capital de Australia?". No está en los documentos, así que el modelo tiene que responder "No lo sé" sin alucinar.
+
+Cada prueba se verifica automáticamente y muestra `[OK]` o `[FALLO]`:
+
+- **Prueba 1**: la respuesta no puede ser "No lo sé" y tiene que citar al menos una referencia.
+- **Prueba 2**: la respuesta tiene que ser exactamente "No lo sé" y las referencias tienen que estar vacías. Si el modelo contesta otra cosa, se considera una alucinación.
+
+Al final se imprime un resumen. El script termina con código `0` si las dos pruebas pasan y con `1` si alguna falla.
 
 Ambas preguntas se pueden reemplazar por parámetro. Las dos son opcionales y, si no se especifican, se usan las de arriba:
 
