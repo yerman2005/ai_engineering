@@ -8,6 +8,7 @@ from typing import Literal, Self
 
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
+from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -18,10 +19,13 @@ ENV_FILE = BASE_DIR / ".env"
 
 # Base vectorial: instalación local de ChromaDB en <repo>/chromadb-local.
 CHROMA_DIR = BASE_DIR.parent / "chromadb-local" / "vectorstore"
-COLLECTION_NAME = "m3_rag"
+COLLECTION_PREFIX = "m3_rag"
 
-# Mismo modelo de embeddings para indexar y para consultar.
-EMBEDDING_MODEL = "text-embedding-3-small"
+# Embeddings: se usa el mismo modelo para indexar y para consultar.
+# - local: all-MiniLM-L6-v2 (ONNX, incluido en chromadb). Corre en la CPU, sin API key ni costo.
+# - openai: text-embedding-3-small (requiere OPENAI_API_KEY con crédito).
+LOCAL_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 
 # Chunking (en tokens) y recuperación.
 CHUNK_SIZE = 500
@@ -35,6 +39,7 @@ MAX_TOKENS = 1024
 
 _ENV_VARS: dict[str, str] = {
     "LLM_PROVIDER": "provider",
+    "EMBEDDINGS_PROVIDER": "embeddings_provider",
     "OPENAI_API_KEY": "openai_api_key",
     "ANTHROPIC_API_KEY": "anthropic_api_key",
     "OPENAI_MODEL": "openai_model",
@@ -50,6 +55,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     provider: Literal["openai", "anthropic"] = "openai"
+    embeddings_provider: Literal["local", "openai"] = "local"
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
     openai_model: str = Field(default=DEFAULT_OPENAI_MODEL, min_length=1)
@@ -63,11 +69,16 @@ class Settings(BaseModel):
         if env_file is not None:
             load_dotenv(env_file)
         values = {
-            field: raw.strip().lower() if field == "provider" else raw.strip()
+            field: raw.strip().lower() if field.endswith("provider") else raw.strip()
             for env_var, field in _ENV_VARS.items()
             if (raw := os.getenv(env_var)) and raw.strip()
         }
         return cls.model_validate(values)
+
+    @property
+    def collection_name(self) -> str:
+        """Una colección por modelo de embeddings: los vectores de modelos distintos no se mezclan."""
+        return f"{COLLECTION_PREFIX}_{self.embeddings_provider}"
 
     def api_key(self) -> SecretStr:
         """Devuelve la API key del proveedor configurado o lanza un error claro."""
@@ -98,13 +109,34 @@ def build_model(settings: Settings) -> BaseChatModel:
     )
 
 
-def build_embeddings(settings: Settings) -> OpenAIEmbeddings:
-    """Modelo de embeddings de OpenAI (requiere OPENAI_API_KEY con cualquier proveedor de LLM)."""
+class LocalEmbeddings(Embeddings):
+    """Adaptador LangChain del modelo all-MiniLM-L6-v2 que trae ChromaDB (ONNX, 384 dimensiones).
+
+    La primera vez descarga el modelo (~80 MB) a la caché de ChromaDB; después funciona offline.
+    """
+
+    def __init__(self) -> None:
+        from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
+
+        self._modelo = ONNXMiniLM_L6_V2()
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [vector.tolist() for vector in self._modelo(texts)]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
+
+
+def build_embeddings(settings: Settings) -> Embeddings:
+    """Modelo de embeddings según `EMBEDDINGS_PROVIDER` (por defecto, local)."""
+    if settings.embeddings_provider == "local":
+        return LocalEmbeddings()
+
     key = settings.openai_api_key
     if key is None or not key.get_secret_value():
-        raise ValueError("Falta OPENAI_API_KEY en .env (se usa para los embeddings).")
+        raise ValueError("Falta OPENAI_API_KEY en .env (EMBEDDINGS_PROVIDER=openai).")
     return OpenAIEmbeddings(
-        model=EMBEDDING_MODEL,
+        model=OPENAI_EMBEDDING_MODEL,
         api_key=key,
         max_retries=settings.max_retries,
         timeout=settings.timeout_s,

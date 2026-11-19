@@ -23,19 +23,22 @@ m3/
 └── README.md
 ```
 
-La base vectorial es la instalación local de ChromaDB en `../chromadb-local`. La colección `m3_rag` se guarda en `../chromadb-local/vectorstore`. Esa carpeta no se versiona y ChromaDB la crea automáticamente en la primera ingesta.
+La base vectorial es la instalación local de ChromaDB en `../chromadb-local`. La colección `m3_rag_<embeddings>` (`m3_rag_local` o `m3_rag_openai`) se guarda en `../chromadb-local/vectorstore`. Esa carpeta no se versiona y ChromaDB la crea automáticamente en la primera ingesta.
 
 ## Componentes
 
 - **Ingesta** (`ingest.py`). `ingestar()` hace lo siguiente:
-  - Si la colección ya tiene datos, no reindexa. Así no se repite el costo de los embeddings.
+  - Si la colección ya tiene datos, no reindexa. Así no se repite el cálculo de los embeddings.
   - Lee los archivos `.txt` y `.md` de `data/`.
   - Los fragmenta con `RecursiveCharacterTextSplitter.from_tiktoken_encoder` en chunks de **500 tokens con 50 de overlap**, medidos con `tiktoken`.
     - `chunk_size=500` es el tamaño objetivo de cada chunk. El splitter corta en límites naturales (párrafos, líneas, oraciones), así que un chunk nunca supera 500 tokens y el último de cada archivo es el resto del documento.
     - Con el dataset de ejemplo (archivos de 667 a 811 tokens) se generan 8 chunks: uno de ~480 tokens y uno de cierre por archivo, con 50 tokens compartidos entre ambos.
   - Les agrega el metadato `source` (nombre del archivo) y un ID determinista (`<archivo>-<n>`).
   - Los persiste con `langchain_chroma.Chroma` (`persist_directory`).
-- **Embeddings**: OpenAI `text-embedding-3-small`. Se usa **el mismo modelo** para indexar y para consultar.
+- **Embeddings**: se elige con `EMBEDDINGS_PROVIDER`. Se usa **el mismo modelo** para indexar y para consultar.
+  - `local` (por defecto): `all-MiniLM-L6-v2`, el modelo ONNX que trae ChromaDB. Corre en la CPU, sin API key ni costo. La primera vez descarga el modelo (~80 MB).
+  - `openai`: `text-embedding-3-small`. Requiere `OPENAI_API_KEY` con crédito.
+  - Cada modelo usa su propia colección, porque los vectores de modelos distintos no son comparables (384 y 1536 dimensiones).
 - **Recuperación** (`rag.py`): `vectorstore.as_retriever(search_kwargs={"k": 4})`. Convierte la pregunta en un embedding y devuelve los 4 fragmentos más similares (top_k = 4).
 - **Generación grounded** (`rag.py`). Es una cadena LCEL:
 
@@ -80,7 +83,8 @@ copy .env.example .env          # Linux/macOS: cp .env.example .env
 | Variable | Descripción | Por defecto |
 |---|---|---|
 | `LLM_PROVIDER` | `openai` o `anthropic` | `openai` |
-| `OPENAI_API_KEY` | **Obligatoria siempre** (embeddings). También es la key del LLM si el proveedor es `openai`. | — |
+| `EMBEDDINGS_PROVIDER` | `local` o `openai` | `local` |
+| `OPENAI_API_KEY` | API key de OpenAI (si `LLM_PROVIDER=openai` o `EMBEDDINGS_PROVIDER=openai`) | — |
 | `ANTHROPIC_API_KEY` | API key de Anthropic (solo si `LLM_PROVIDER=anthropic`) | — |
 | `OPENAI_MODEL` | Modelo de OpenAI | `gpt-4o-mini` |
 | `ANTHROPIC_MODEL` | Modelo de Anthropic | `claude-sonnet-5-5` |
@@ -117,7 +121,7 @@ python main.py --help                                                    # muest
 
 Para reindexar desde cero, borrá la carpeta `../chromadb-local/vectorstore`.
 
-> El script hace llamadas reales a las APIs (embeddings y LLM), y esas llamadas tienen costo.
+> El script hace llamadas reales a la API del LLM, y esas llamadas tienen costo. Con `EMBEDDINGS_PROVIDER=local`, los embeddings no tienen costo.
 
 Uso desde código:
 

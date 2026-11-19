@@ -16,7 +16,6 @@ from config import (
     CHROMA_DIR,
     CHUNK_OVERLAP,
     CHUNK_SIZE,
-    COLLECTION_NAME,
     DATA_DIR,
     Settings,
     build_embeddings,
@@ -31,7 +30,7 @@ def get_vectorstore(settings: Settings | None = None) -> Chroma:
     """Abre (o crea) la colección persistente en disco."""
     settings = settings or Settings.from_env()
     return Chroma(
-        collection_name=COLLECTION_NAME,
+        collection_name=settings.collection_name,
         embedding_function=build_embeddings(settings),
         persist_directory=str(CHROMA_DIR),
     )
@@ -60,12 +59,13 @@ def fragmentar(documentos: list[Document]) -> list[Document]:
 
 def ingestar() -> int:
     """Puebla la colección si está vacía. Devuelve la cantidad de chunks en la colección."""
-    vectorstore = get_vectorstore()
+    settings = Settings.from_env()
+    vectorstore = get_vectorstore(settings)
     existentes = vectorstore._collection.count()
     if existentes > 0:
         logger.info(
             "La colección '%s' ya existe en %s (%d chunks). No se reindexa.",
-            COLLECTION_NAME, CHROMA_DIR, existentes,
+            settings.collection_name, CHROMA_DIR, existentes,
         )
         return existentes
 
@@ -83,7 +83,7 @@ def ingestar() -> int:
     vectorstore.add_documents(chunks, ids=ids)
     logger.info(
         "Indexados %d chunks de %d documentos en '%s' (%s).",
-        len(chunks), len(documentos), COLLECTION_NAME, CHROMA_DIR,
+        len(chunks), len(documentos), settings.collection_name, CHROMA_DIR,
     )
     return len(chunks)
 
